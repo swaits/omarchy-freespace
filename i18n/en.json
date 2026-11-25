@@ -1,0 +1,21 @@
+{
+  "tip": "Free space",
+  "title": "Free space",
+  "settings": "Settings",
+  "bardisks": "Show in bar",
+  "loading": "Reading disks...",
+  "group.disks": "Disks",
+  "group.removable": "Removable",
+  "none": "No disks found",
+  "of": "%1 free of %2",
+  "percent": "%1% free",
+  "btrfs.warn": "Nearly all space is reserved. Deleting files may not help; a cleanup is needed.",
+  "btrfs.crit": "Out of room for file records. The system may freeze. Free space and run a cleanup now.",
+  "eject": "Eject",
+  "ejecting": "Ejecting...",
+  "error.eject": "Eject failed: %1",
+  "error.path": "Unsafe device path",
+  "format.free": "Free space",
+  "format.freeTotal": "Free / total",
+  "format.percent": "Percent free"
+}

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.swaits.freespace",
+  "name": "Free Space",
+  "version": "1.0.0",
+  "author": "Stephen Waits",
+  "license": "MIT",
+  "description": "Free disk space in the bar; click to list every disk and eject removable ones.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "Panel.qml" },
+  "barWidget": {
+    "displayName": "Free Space",
+    "description": "Free space of your chosen disks in the bar; click for all disks and eject.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": { "format": "free", "barDisks": ["/"] },
+    "schema": [
+      {
+        "key": "format",
+        "type": "enum",
+        "label": "Format",
+        "options": ["free", "freeTotal", "percent"],
+        "defaultValue": "free",
+        "description": "free: 412G. freeTotal: 412G/1.8T. percent: 22% free."
+      },
+      {
+        "key": "barDisks",
+        "type": "multiselect",
+        "label": "Disks in the bar",
+        "description": "Pick by mount point. A disk with several mount points shows once.",
+        "noSelectionText": "None",
+        "optionsCommand": ["findmnt", "-rn", "-o", "TARGET", "--real"],
+        "defaultValue": ["/"]
+      }
+    ]
+  }
+}
