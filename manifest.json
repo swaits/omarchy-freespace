@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.swaits.freespace",
   "name": "Free Space",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Stephen Waits",
   "license": "MIT",
   "description": "Free disk space in the bar; click to list every disk and eject removable ones.",

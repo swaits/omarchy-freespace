@@ -21,12 +21,11 @@ Panel {
   readonly property var barDisks: { var v = setting("barDisks", ["/"]); return Array.isArray(v) ? v : ["/"] }
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.4)
-  readonly property color urgent: bar ? bar.urgent : Commons.Color.urgent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   // Theme palette (colors.toml): yellow / red.
   property color warnColor: "#e0a93b"
-  property color critColor: urgent
+  property color critColor: bar ? bar.urgent : Commons.Color.urgent
   FileView {
     path: Quickshell.env("HOME") + "/.local/state/omarchy/current/theme/colors.toml"
     watchChanges: true
@@ -41,32 +40,30 @@ Panel {
 
   property var rows: []
   property var alloc: ({})
+  property bool loaded: false
+  property bool settingsOpen: false
+  property string busy: ""                 // disk being ejected
+  property string errDisk: ""              // disk whose eject failed
+  property string errMsg: ""
+  property var steps: []
+
   // 0 fine, 1 warning, 2 critical: worst of low free space and btrfs health
   function level(r) { return Math.max(Model.freeLevel(r), Model.health(r, alloc[r.uuid])) }
   function tint(lv, normal) { return lv === 2 ? critColor : lv === 1 ? warnColor : normal }
-  property bool loaded: false
-  property string busy: ""          // disk path being ejected
-  property string errDisk: ""       // disk whose eject failed
-  property string errMsg: ""
-  property bool settingsOpen: false
-
-  // Settings are saved to this widget's entry in shell.json, which reloads live.
-  function save(key, json) { setProc.command = ["omarchy", "bar", "set", moduleName, key, json, "--json"]; setProc.running = true }
-  function toggleDisk(r) {
-    var on = r.mounts.some(function(m) { return barDisks.indexOf(m) >= 0 })
-    save("barDisks", JSON.stringify(on ? barDisks.filter(function(m) { return r.mounts.indexOf(m) < 0 }) : barDisks.concat([r.mounts[0]])))
-  }
-  Process { id: setProc }
-  property var steps: []
-
+  function inBar(r) { return r.mounts.some(function(m) { return barDisks.indexOf(m) >= 0 }) }
   function nf(v, d) { return Commons.I18n.formatNumber(v, d) }
   function sz(b) { return Model.size(b, nf) }
   function cell(r) {
     if (format === "percent") return tr("percent").arg(nf(Math.round(100 * r.avail / r.size), 0))
     return sz(r.avail) + (format === "freeTotal" ? "/" + sz(r.size) : "")
   }
-  readonly property var barRows: rows.filter(function(r) { return r.mounts.some(function(m) { return barDisks.indexOf(m) >= 0 }) })
-  function shortName(r) { return r.name === "/" ? "/" : r.name.replace(/^.*\//, "").substring(0, 10) }
+  readonly property var barRows: rows.filter(inBar)
+
+  // Settings are saved to this widget's entry in shell.json, which reloads live.
+  function save(key, json) { setProc.command = ["omarchy", "bar", "set", moduleName, key, json, "--json"]; setProc.running = true }
+  function toggleDisk(r) {
+    save("barDisks", JSON.stringify(inBar(r) ? barDisks.filter(function(m) { return r.mounts.indexOf(m) < 0 }) : barDisks.concat([r.mounts[0]])))
+  }
 
   function refresh() { if (!lsblk.running) lsblk.running = true }
   function ejectRow(r) {
@@ -87,24 +84,21 @@ Panel {
     steps = []; busy = ""; refresh()
   }
 
+  Process { id: setProc }
   Process {
     id: lsblk
     command: ["lsblk", "-J", "-b", "-o", "NAME,PATH,PKNAME,TYPE,RM,HOTPLUG,TRAN,LABEL,MODEL,FSTYPE,UUID,MOUNTPOINTS,FSAVAIL,FSSIZE"]
-    stdout: StdioCollector { onStreamFinished: { root.rows = Model.parse(text); root.loaded = true
+    stdout: StdioCollector { onStreamFinished: {
+      root.rows = Model.parse(text); root.loaded = true
       var ps = Model.allocPaths(root.rows)
-      if (ps.length) { allocProc.command = ["tail", "-n", "+1", "--"].concat(ps); allocProc.running = true } else root.alloc = ({}) } }
+      if (ps.length) { allocProc.command = ["tail", "-n", "+1", "--"].concat(ps); allocProc.running = true } else root.alloc = ({})
+    } }
   }
-  Process {
-    id: allocProc
-    stdout: StdioCollector { onStreamFinished: root.alloc = Model.parseAlloc(text) }
-  }
+  Process { id: allocProc; stdout: StdioCollector { onStreamFinished: root.alloc = Model.parseAlloc(text) } }
   Process {
     id: stepProc
     stderr: StdioCollector { id: stepErr }
-    onExited: function(code) {
-      if (code === 0) root.next()
-      else root.fail(root.busy, stepErr.text !== "" ? stepErr.text : "exit " + code)
-    }
+    onExited: function(code) { if (code === 0) root.next(); else root.fail(root.busy, stepErr.text !== "" ? stepErr.text : "exit " + code) }
   }
   Timer { interval: 30000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.refresh() }
   onOpenedChanged: { if (opened) refresh(); else settingsOpen = false }
@@ -124,61 +118,28 @@ Panel {
     tooltipText: root.tr("tip")
     onPressed: function(b) { if (b === Qt.MiddleButton) root.refresh(); else root.toggle() }
 
-    GridLayout {
+    component BT: Text {
+      textFormat: Text.PlainText
+      color: button.foreground
+      font.family: button.fontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+    Row {
       id: pill
       anchors.centerIn: parent
-      columns: 2
-      columnSpacing: Style.space(3)
-      Text {
-        Layout.alignment: Qt.AlignHCenter | Qt.AlignVCenter
-        textFormat: Text.PlainText
-        text: "󰋊"
-        color: button.foreground
-        font.family: button.fontFamily
-        font.pixelSize: Style.font.caption
-      }
-      Row {
-        Layout.alignment: Qt.AlignHCenter | Qt.AlignVCenter
-        spacing: Style.space(4)
-        Text {
-          visible: !root.loaded || root.barRows.length === 0
-          textFormat: Text.PlainText
-          text: root.loaded ? "–" : "…"
-          color: button.foreground
-          font.family: button.fontFamily
-          font.pixelSize: Style.font.bodySmall
-        }
-        Repeater {
-          model: root.barRows
-          Row {
-            id: cellRow
-            required property var modelData
-            required property int index
-            spacing: Style.space(3)
-            Text {
-              visible: cellRow.index > 0
-              textFormat: Text.PlainText
-              text: "·"
-              color: Qt.darker(button.foreground, 1.8)
-              font.family: button.fontFamily
-              font.pixelSize: Style.font.bodySmall
-            }
-            Text {
-              textFormat: Text.PlainText
-              text: root.shortName(cellRow.modelData)
-              color: Qt.darker(button.foreground, 1.45)
-              font.family: button.fontFamily
-              font.pixelSize: Style.font.bodySmall
-            }
-            Text {
-              textFormat: Text.PlainText
-              text: root.cell(cellRow.modelData)
-              color: root.tint(root.level(cellRow.modelData), button.foreground)
-              font.family: button.fontFamily
-              font.pixelSize: Style.font.bodySmall
-              font.weight: Font.DemiBold
-            }
-          }
+      spacing: Style.space(3)
+      BT { anchors.verticalCenter: parent.verticalCenter; text: "󰋊"; font.pixelSize: Style.font.caption }
+      BT { visible: !root.loaded || root.barRows.length === 0; text: root.loaded ? "–" : "…" }
+      Repeater {
+        model: root.barRows
+        Row {
+          id: cellRow
+          required property var modelData
+          required property int index
+          spacing: Style.space(3)
+          BT { visible: cellRow.index > 0; text: "·"; color: Qt.darker(button.foreground, 1.8) }
+          BT { text: cellRow.modelData.name === "/" ? "/" : cellRow.modelData.name.replace(/^.*\//, "").substring(0, 10); color: Qt.darker(button.foreground, 1.45) }
+          BT { text: root.cell(cellRow.modelData); color: root.tint(root.level(cellRow.modelData), button.foreground); font.weight: Font.DemiBold }
         }
       }
     }
@@ -213,15 +174,11 @@ Panel {
           font.pixelSize: Style.font.body
           elide: Text.ElideRight
         }
+        component Head: PanelSectionHeader { foreground: root.foreground; fontFamily: root.fontFamily }
 
         Item {
           width: parent.width; height: Style.space(22)
-          PanelSectionHeader {
-            anchors.verticalCenter: parent.verticalCenter
-            text: root.tr(root.settingsOpen ? "settings" : "title")
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-          }
+          Head { anchors.verticalCenter: parent.verticalCenter; text: root.tr(root.settingsOpen ? "settings" : "title") }
           PanelActionButton {
             anchors.right: parent.right
             iconText: "󰒓"
@@ -242,36 +199,27 @@ Panel {
               model: ["free", "freeTotal", "percent"]
               Button {
                 required property string modelData
-                bordered: true
+                bordered: true; fontFamily: root.fontFamily
                 selected: root.format === modelData
                 text: root.tr("format." + modelData)
-                fontFamily: root.fontFamily
                 onClicked: root.save("format", JSON.stringify(modelData))
               }
             }
           }
-          PanelSectionHeader { text: root.tr("bardisks"); foreground: root.foreground; fontFamily: root.fontFamily }
+          Head { text: root.tr("bardisks") }
           Repeater {
             model: root.rows
             Toggle {
               required property var modelData
               width: parent.width
-              label: modelData.name
-              checked: modelData.mounts.some(function(m) { return root.barDisks.indexOf(m) >= 0 })
-              foreground: root.foreground
-              fontFamily: root.fontFamily
+              label: modelData.name; foreground: root.foreground; fontFamily: root.fontFamily
+              checked: root.inBar(modelData)
               onClicked: root.toggleDisk(modelData)
             }
           }
         }
 
-        T {
-          visible: root.loaded && root.rows.length === 0 && !root.settingsOpen
-          width: parent.width
-          color: root.dim
-          text: root.tr("none")
-        }
-        T { visible: !root.loaded && !root.settingsOpen; width: parent.width; color: root.dim; text: root.tr("loading") }
+        T { visible: !root.settingsOpen && (!root.loaded || root.rows.length === 0); width: parent.width; color: root.dim; text: root.tr(root.loaded ? "none" : "loading") }
 
         Repeater {
           model: [false, true]
@@ -284,32 +232,26 @@ Panel {
             spacing: Style.space(8)
 
             PanelSeparator { visible: group.modelData && root.rows.some(function(r) { return !r.removable }); foreground: root.foreground }
-            PanelSectionHeader {
-              text: root.tr(group.modelData ? "group.removable" : "group.disks")
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-            }
+            Head { text: root.tr(group.modelData ? "group.removable" : "group.disks") }
             Repeater {
               model: group.list
               Column {
                 id: row
                 required property var modelData
+                readonly property int hl: Model.health(modelData, root.alloc[modelData.uuid])
+                readonly property color tone: root.tint(root.level(modelData), root.dim)
                 width: group.width
                 spacing: Style.space(3)
                 RowLayout {
                   width: parent.width
                   spacing: Style.space(8)
                   T { Layout.fillWidth: true; font.weight: Font.DemiBold; text: row.modelData.name }
-                  T {
-                    color: root.tint(root.level(row.modelData), root.dim)
-                    text: root.tr("of").arg(root.sz(row.modelData.avail)).arg(root.sz(row.modelData.size))
-                  }
+                  T { color: row.tone; text: root.tr("of").arg(root.sz(row.modelData.avail)).arg(root.sz(row.modelData.size)) }
                   Button {
                     visible: row.modelData.removable
                     enabled: root.busy === ""
-                    bordered: true
-                    text: root.busy === row.modelData.disk ? root.tr("ejecting") : root.tr("eject")
-                    fontFamily: root.fontFamily
+                    bordered: true; fontFamily: root.fontFamily
+                    text: root.tr(root.busy === row.modelData.disk ? "ejecting" : "eject")
                     onClicked: root.ejectRow(row.modelData)
                   }
                 }
@@ -322,23 +264,8 @@ Panel {
                     color: root.tint(root.level(row.modelData), Commons.Color.accent)
                   }
                 }
-                T {
-                  readonly property int hl: Model.health(row.modelData, root.alloc[row.modelData.uuid])
-                  visible: hl > 0
-                  width: parent.width
-                  wrapMode: Text.WordWrap
-                  elide: Text.ElideNone
-                  color: root.tint(hl, root.dim)
-                  text: root.tr(hl === 2 ? "btrfs.crit" : "btrfs.warn")
-                }
-                T {
-                  visible: root.errDisk === row.modelData.disk
-                  width: parent.width
-                  wrapMode: Text.WordWrap
-                  elide: Text.ElideNone
-                  color: root.urgent
-                  text: root.errMsg
-                }
+                T { visible: row.hl > 0; width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: row.tone; text: root.tr(row.hl === 2 ? "btrfs.crit" : "btrfs.warn") }
+                T { visible: root.errDisk === row.modelData.disk; width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: root.critColor; text: root.errMsg }
               }
             }
           }
