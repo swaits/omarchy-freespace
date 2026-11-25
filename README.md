@@ -18,6 +18,22 @@ disks get an Eject button. That is all it does: no folder breakdowns.
 omarchy plugin add https://github.com/swaits/omarchy-freespace.git --enable
 ```
 
+## Remove
+
+```sh
+omarchy plugin remove io.github.swaits.freespace --yes
+```
+
+## Dependencies
+
+No packages to install beyond a stock Omarchy: it calls `lsblk`, `findmnt`,
+`udisksctl` (eject) and `btrfs` (out-of-room check, btrfs disks only), which
+Omarchy already ships.
+
+## License
+
+MIT, see `LICENSE`.
+
 ## Settings
 
 Click the gear in the panel.
